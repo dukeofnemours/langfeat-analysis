@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "langfeat-analysis"
+version = "0.2.0"
+description = "Batch-safe, stimulus-aligned language and audio feature pipelines"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "Damien Kemka Douanla" }]
+dependencies = [
+  "numpy>=2.0",
+  "pandas>=2.2",
+  "PyYAML>=6.0",
+  "soundfile>=0.12",
+]
+
+[project.optional-dependencies]
+audio = [
+  "librosa>=0.11",
+  "matplotlib>=3.9",
+  "natural-features @ git+https://github.com/dukeofnemours/natural-features.git@9d205df72d1178d32b2558614deb18c6b5a09bf8",
+  "openl3>=0.4.2",
+]
+text = [
+  "librosa>=0.11",
+  "mlx-audio>=0.4.5; platform_system == 'Darwin'",
+  "torch>=2.4",
+  "qwen-asr>=0.0.6",
+  "sentence-transformers>=3.0",
+]
+dev = [
+  "pytest>=8.0",
+]
+
+[project.scripts]
+lafa = "langfeat_analysis.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

@@ -1,0 +1,104 @@
+version: 1
+
+# Common temporal resolution. Each process can override this under settings.
+defaults:
+  tr_s: 1.0
+
+# Batch items are isolated: a failed stimulus is logged and the next stimulus
+# still runs. Set continue_on_error to false (or pass --fail-fast) to stop early.
+batch:
+  continue_on_error: true
+  workers: 1
+
+# The registry appends one complete JSON object per line. Omit filename to use
+# one UTC-dated JSONL file; run_id keeps concurrent runs distinguishable.
+logging:
+  directory: ../logs
+  filename: null
+  include_traceback: true
+  fsync_on_write: false
+
+# All paths are relative to this YAML file. Output directories are created by
+# the pipeline. Processes run in the order shown below.
+processes:
+  audio_features:
+    enabled: true
+    input:
+      directory: ../scripts/audio/tests
+      pattern: "*.wav"
+    output:
+      directory: ../outputs/audio/features
+      file_template: "{title}.json"
+    settings:
+      features: [mfcc, mel, vad]
+
+  acoustic_phonetics:
+    enabled: true
+    input:
+      directory: ../scripts/audio/tests
+      pattern: "*.wav"
+    output:
+      directory: ../outputs/audio/phonetics
+      file_template: "{title}.json"
+    settings:
+      extractor_options:
+        posterior_backend: ctc
+        ctc_model: bobboyms/wav2vec2-base-en-phoneme-ctc-41h
+        ctc_local_files_only: true
+        include_uncertainty: true
+        renormalize_posteriors: true
+
+  audio_embeddings:
+    enabled: true
+    input:
+      directory: ../scripts/audio/tests
+      pattern: "*.wav"
+    output:
+      directory: ../outputs/audio/embeddings
+      file_template: "{title}.json"
+    settings:
+      embedding_options:
+        content_type: env
+        input_repr: linear
+        center: false
+        embedding_size: 512
+        verbose: false
+
+  transcripts:
+    enabled: true
+    input:
+      directory: ../scripts/audio/tests
+      pattern: "*.wav"
+    output:
+      directory: ../outputs/transcripts
+      file_template: "{stimulus}-annotations.csv"
+      columns: [word, onset, offset, chunk_index]
+    settings:
+      language: English
+      max_new_tokens: 8192
+      chunk_seconds: 270.0
+      target_sample_rate: 16000
+      pytorch_asr_model: Qwen/Qwen3-ASR-0.6B
+      pytorch_aligner_model: Qwen/Qwen3-ForcedAligner-0.6B
+      mlx_asr_model: mlx-community/Qwen3-ASR-0.6B-8bit
+      mlx_aligner_model: mlx-community/Qwen3-ForcedAligner-0.6B-8bit
+
+  text_embeddings:
+    enabled: true
+    input:
+      annotations:
+        directory: ../outputs/transcripts
+        pattern: "*-annotations.csv"
+      stimuli:
+        directory: ../scripts/audio/tests
+        pattern: "*.wav"
+      matching:
+        annotation_suffix: "-annotations"
+        case_sensitive: false
+    output:
+      directory: ../outputs/text/embeddings
+      file_template: "{title}.json"
+    settings:
+      model_name: sentence-transformers/all-MiniLM-L6-v2
+      context_window: 3
+      strict_annotations: false
