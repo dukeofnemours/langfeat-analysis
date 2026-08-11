@@ -19,6 +19,7 @@ from langfeat_analysis.pipeline.config import (
 )
 from langfeat_analysis.pipeline.errors import ConfigurationError, PipelineError
 from langfeat_analysis.pipeline.runner import BatchPipeline
+from langfeat_analysis.pipeline.progress import TerminalReporter
 from langfeat_analysis.registry import EventRegistry
 from langfeat_analysis.io import atomic_json_dump
 
@@ -94,6 +95,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--report",
         type=Path,
         help="Also write the final machine-readable report to this JSON file.",
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress terminal status and progress updates (JSON output remains).",
     )
     return parser.parse_args(argv)
 
@@ -287,7 +293,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.fail_fast:
             config.setdefault("batch", {})["continue_on_error"] = False
         registry = create_registry(config, config_dir)
-        report = BatchPipeline(config, config_dir, registry).run(args.only)
+        reporter = TerminalReporter(enabled=not args.quiet)
+        report = BatchPipeline(config, config_dir, registry, reporter).run(args.only)
         payload = report.to_dict()
         if args.report:
             _write_report(args.report, payload)

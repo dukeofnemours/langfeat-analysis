@@ -53,6 +53,15 @@ still exits with status 1 for partial failure so schedulers detect it; pass
 `--allow-partial-success` only when a zero exit status is explicitly desired.
 Use `--fail-fast` to override the YAML for a particular run.
 
+### Terminal feedback
+
+During a run, `lafa` writes human-readable status updates to stderr while
+leaving the final JSON report on stdout. Each pipeline and process begins with
+`[PENDING]`; every item ends as `[SUCCESS]` or `[FAILED]`; and each batch item
+advances a `[PROGRESS]` bar. This keeps the terminal informative without
+breaking shell scripts that capture stdout. Pass `--quiet` to suppress these
+terminal updates.
+
 ### Custom input and output directories
 
 The short form follows the storage layout created by `collect-stimuli.sh`:

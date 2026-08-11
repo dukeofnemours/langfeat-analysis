@@ -8,3 +8,4 @@ venv*/
 outputs/
 logs/*.jsonl
 !logs/.gitkeep
+samples/

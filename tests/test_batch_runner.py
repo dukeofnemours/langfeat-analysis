@@ -1,8 +1,10 @@
 import json
+from io import StringIO
 from pathlib import Path
 
 from langfeat_analysis.pipeline.config import validate_config
 from langfeat_analysis.pipeline.runner import BatchPipeline
+from langfeat_analysis.pipeline.progress import TerminalReporter
 from langfeat_analysis.registry import EventRegistry
 
 
@@ -27,7 +29,13 @@ def test_batch_continues_after_one_item_fails(tmp_path, monkeypatch):
     }
     validate_config(config)
     registry = EventRegistry(tmp_path / "logs", filename="events.jsonl")
-    pipeline = BatchPipeline(config, tmp_path, registry)
+    terminal = StringIO()
+    pipeline = BatchPipeline(
+        config,
+        tmp_path,
+        registry,
+        TerminalReporter(terminal),
+    )
 
     def fake_process(name, process, path):
         if path.name == "bad.wav":
@@ -49,3 +57,9 @@ def test_batch_continues_after_one_item_fails(tmp_path, monkeypatch):
     ]
     assert any(event["event"] == "item_failed" for event in events)
     assert any(event["event"] == "item_completed" for event in events)
+    feedback = terminal.getvalue()
+    assert "[PENDING] Pipeline" in feedback
+    assert "[PROGRESS] audio_features" in feedback
+    assert "[FAILED] audio_features: bad.wav" in feedback
+    assert "[SUCCESS] audio_features: good.wav" in feedback
+    assert "[FAILED] audio_features: 1 succeeded, 1 failed" in feedback

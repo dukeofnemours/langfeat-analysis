@@ -12,6 +12,7 @@ from langfeat_analysis.registry import EventRegistry
 
 from .config import discover_files, resolve_path, selected_processes
 from .errors import InputError, ProcessError
+from .progress import TerminalReporter
 
 
 AUDIO_PROCESSES = {"audio_features", "acoustic_phonetics", "audio_embeddings"}
@@ -97,11 +98,13 @@ class BatchPipeline:
         config: dict[str, Any],
         config_dir: Path,
         registry: EventRegistry,
+        reporter: TerminalReporter | None = None,
     ) -> None:
         """Configure a batch run from validated YAML and a shared registry."""
         self.config = config
         self.config_dir = config_dir
         self.registry = registry
+        self.reporter = reporter or TerminalReporter(enabled=False)
         self.default_tr_s = float(config.get("defaults", {}).get("tr_s", 1.0))
         batch = config.get("batch", {})
         self.continue_on_error = bool(batch.get("continue_on_error", True))
@@ -110,6 +113,7 @@ class BatchPipeline:
         """Run enabled processes and always return completed item outcomes."""
         names = selected_processes(self.config, selected)
         run_timer = self.registry.timer()
+        self.reporter.pipeline_pending(names)
         self.registry.emit(
             "pipeline_started",
             "started",
@@ -124,6 +128,7 @@ class BatchPipeline:
                 if result.failed and not self.continue_on_error:
                     break
         except KeyboardInterrupt:
+            self.reporter.pipeline_interrupted()
             self.registry.emit(
                 "pipeline_interrupted",
                 "failed",
@@ -152,6 +157,9 @@ class BatchPipeline:
                 "items_failed": failures,
             },
         )
+        self.reporter.pipeline_finished(
+            sum(result.succeeded for result in results), failures
+        )
         return PipelineReport(
             run_id=self.registry.run_id,
             log_path=str(self.registry.path),
@@ -161,6 +169,8 @@ class BatchPipeline:
 
     def _run_process(self, name: str, process: dict[str, Any]) -> ProcessResult:
         timer = self.registry.timer()
+        process_error_message = ""
+        self.reporter.process_pending(name)
         self.registry.emit("process_started", "started", process=name)
         try:
             if name in AUDIO_PROCESSES:
@@ -172,6 +182,7 @@ class BatchPipeline:
             else:  # Configuration validation should make this unreachable.
                 raise ProcessError(name, None, "process implementation is unavailable")
         except Exception as error:
+            process_error_message = str(error)
             self.registry.emit(
                 "process_failed",
                 "failed",
@@ -202,6 +213,12 @@ class BatchPipeline:
                 duration_ms=timer.elapsed_ms,
                 details={"succeeded": result.succeeded, "failed": result.failed},
             )
+        self.reporter.process_finished(
+            name,
+            result.succeeded,
+            result.failed,
+            error_message=process_error_message,
+        )
         return result
 
     def _run_audio_process(
@@ -360,7 +377,15 @@ class BatchPipeline:
             pairs,
             embed,
             input_name=lambda pair: str(pair[0]),
+            total_items=len(pairs) + len(pairing_errors),
         )
+        for item in pairing_errors:
+            self.reporter.item_finished(
+                "text_embeddings",
+                item.input_path,
+                "failed",
+                error_message=item.error_message,
+            )
         result.items = pairing_errors + result.items
         result.status = "success" if result.failed == 0 else "failed"
         return result
@@ -475,8 +500,10 @@ class BatchPipeline:
         operation: Callable[[Any], list[Path]],
         *,
         input_name: Callable[[Any], str] = str,
+        total_items: int | None = None,
     ) -> ProcessResult:
         results: list[ItemResult] = []
+        self.reporter.items_pending(process, total_items if total_items is not None else len(items))
         for item in items:
             name = input_name(item)
             timer = self.registry.timer()
@@ -513,6 +540,12 @@ class BatchPipeline:
                     error=explained,
                 )
                 logging.error("%s", explained)
+                self.reporter.item_finished(
+                    process,
+                    name,
+                    "failed",
+                    error_message=str(explained),
+                )
                 if not self.continue_on_error:
                     break
             else:
@@ -527,6 +560,12 @@ class BatchPipeline:
                     input_path=name,
                     duration_ms=timer.elapsed_ms,
                     details={"output_paths": output_strings},
+                )
+                self.reporter.item_finished(
+                    process,
+                    name,
+                    "success",
+                    output_count=len(output_strings),
                 )
         status = "success" if all(item.status == "success" for item in results) else "failed"
         return ProcessResult(process=process, status=status, items=results)
