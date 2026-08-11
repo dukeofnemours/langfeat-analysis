@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compatibility entry point; prefer the installed ``langfeat-preproc`` CLI."""
+"""Compatibility entry point; prefer the installed ``lafa`` CLI."""
 
 from pathlib import Path
 import sys

@@ -19,7 +19,8 @@ logging:
   fsync_on_write: false
 
 # All paths are relative to this YAML file. Output directories are created by
-# the pipeline. Processes run in the order shown below.
+# the pipeline. CLI -i/--input-dir and -o/--output-dir override these paths.
+# Processes run in the order shown below.
 processes:
   audio_features:
     enabled: true
@@ -93,6 +94,7 @@ processes:
         directory: ../scripts/audio/tests
         pattern: "*.wav"
       matching:
+        strategy: stem
         annotation_suffix: "-annotations"
         case_sensitive: false
     output:

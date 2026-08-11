@@ -35,10 +35,10 @@ The local development environment can also use its existing dependencies with
 ## Running the pipeline
 
 ```bash
-langfeat-preproc --config configs/preproc.yaml --dry-run
-langfeat-preproc --config configs/preproc.yaml
-langfeat-preproc --only audio_features --only audio_embeddings
-langfeat-preproc --report outputs/preproc-report.json
+lafa --config configs/preproc.yaml --dry-run
+lafa --config configs/preproc.yaml
+lafa --only audio_features --only audio_embeddings
+lafa --report outputs/preproc-report.json
 ```
 
 The legacy invocation remains available:
@@ -52,6 +52,46 @@ stimulus receives a failed item result while later stimuli continue. The CLI
 still exits with status 1 for partial failure so schedulers detect it; pass
 `--allow-partial-success` only when a zero exit status is explicitly desired.
 Use `--fail-fast` to override the YAML for a particular run.
+
+### Custom input and output directories
+
+The short form follows the storage layout created by `collect-stimuli.sh`:
+
+```bash
+lafa \
+  --input-dir /path/to/data-storage/features \
+  --output-dir /path/to/preprocessed-results
+```
+
+When present, `INPUT/audio` supplies WAV stimuli and `INPUT/text` supplies CSV,
+TSV, and TextGrid annotations. If these modality folders are absent, `INPUT` is
+treated as a flat directory. Collector names such as
+`alias_audio_story_123.wav` and `alias_text_story_456.csv` are paired by alias
+and source stem; their different path checksums do not prevent matching.
+Ambiguous matches fail explicitly. Results are routed below the output root:
+
+```text
+OUTPUT/audio/features
+OUTPUT/audio/phonetics
+OUTPUT/audio/embeddings
+OUTPUT/transcripts
+OUTPUT/text/embeddings
+OUTPUT/logs
+```
+
+Ambiguous or split layouts can be specified directly:
+
+```bash
+lafa \
+  --audio-input-dir /data/stimuli \
+  --annotation-input-dir /data/annotations \
+  --output-dir /scratch/lafa-results \
+  --log-dir /project/registry/logs
+```
+
+The collector accepts MP3, TXT, and EAF for storage, but current preprocessing
+supports WAV audio and CSV, TSV, or TextGrid annotations. Unsupported files are
+excluded by the CLI override patterns rather than failing unrelated batch items.
 
 ## Failure messages and safeguards
 

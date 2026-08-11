@@ -346,5 +346,5 @@ class AudioVectorizer:
 
 if __name__ == "__main__":
     raise SystemExit(
-        "Run `langfeat-preproc --config configs/preproc.yaml` instead."
+        "Run `lafa --config configs/preproc.yaml` instead."
     )

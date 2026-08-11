@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Sequence
@@ -14,6 +15,30 @@ from .errors import InputError, ProcessError
 
 
 AUDIO_PROCESSES = {"audio_features", "acoustic_phonetics", "audio_embeddings"}
+
+
+def collector_match_keys(
+    stem: str, modality: str, *, case_sensitive: bool = False
+) -> set[str]:
+    """Return pairing keys for names produced by ``collect-stimuli.sh``.
+
+    Collector names end in a path checksum and include ``_audio_`` or
+    ``_text_``. Multiple keys are returned when those marker words also occur
+    in an alias or source stem; the caller must require a unique file match.
+    """
+    without_checksum = re.sub(r"_\d+$", "", stem)
+    searchable = without_checksum if case_sensitive else without_checksum.casefold()
+    marker = f"_{modality}_"
+    keys: set[str] = set()
+    start = 0
+    while True:
+        index = searchable.find(marker, start)
+        if index < 0:
+            break
+        key = without_checksum[:index] + "\0" + without_checksum[index + len(marker) :]
+        keys.add(key if case_sensitive else key.casefold())
+        start = index + 1
+    return keys
 
 
 @dataclass
@@ -357,6 +382,7 @@ class BatchPipeline:
         matching = input_config.get("matching", {})
         suffix = str(matching.get("annotation_suffix", "-annotations"))
         case_sensitive = bool(matching.get("case_sensitive", False))
+        strategy = str(matching.get("strategy", "stem"))
         normalize = (lambda value: value) if case_sensitive else str.casefold
 
         stimulus_by_stem: dict[str, Path] = {}
@@ -372,19 +398,63 @@ class BatchPipeline:
                 f"these stems: {', '.join(sorted(duplicates))}."
             )
 
+        collector_stimuli: dict[str, set[Path]] = {}
+        if strategy in {"collector", "auto"}:
+            for stimulus in stimuli:
+                for key in collector_match_keys(
+                    stimulus.stem, "audio", case_sensitive=case_sensitive
+                ):
+                    collector_stimuli.setdefault(key, set()).add(stimulus)
+
         pairs: list[tuple[Path, Path]] = []
         errors: list[ItemResult] = []
         for annotation in annotations:
             stem = annotation.stem
             if suffix and normalize(stem).endswith(normalize(suffix)):
                 stem = stem[: -len(suffix)]
-            stimulus = stimulus_by_stem.get(normalize(stem))
+            stimulus = (
+                stimulus_by_stem.get(normalize(stem))
+                if strategy in {"stem", "auto"}
+                else None
+            )
+            collector_candidates: set[Path] = set()
+            if stimulus is None and strategy in {"collector", "auto"}:
+                for key in collector_match_keys(
+                    annotation.stem, "text", case_sensitive=case_sensitive
+                ):
+                    collector_candidates.update(collector_stimuli.get(key, set()))
+                if len(collector_candidates) == 1:
+                    stimulus = next(iter(collector_candidates))
+                elif len(collector_candidates) > 1:
+                    error = ProcessError(
+                        "text_embeddings",
+                        annotation,
+                        "collector filename matches multiple audio stimuli: "
+                        + ", ".join(sorted(path.name for path in collector_candidates)),
+                        hint="Use --audio-input-dir with a narrower directory or rename ambiguous files.",
+                    )
+                    errors.append(
+                        self._failed_item("text_embeddings", annotation, error)
+                    )
+                    self.registry.emit(
+                        "item_failed",
+                        "failed",
+                        process="text_embeddings",
+                        input_path=annotation,
+                        error=error,
+                    )
+                    continue
             if stimulus is None:
                 error = ProcessError(
                     "text_embeddings",
                     annotation,
-                    f"no stimulus audio matched annotation stem '{stem}'",
-                    hint="Check input.matching.annotation_suffix and stimulus filenames.",
+                    f"no stimulus audio matched annotation stem '{stem}' "
+                    f"using strategy '{strategy}'",
+                    hint=(
+                        "Check matching.strategy/annotation_suffix, or use the "
+                        "collector-style alias_audio_NAME_CHECKSUM and "
+                        "alias_text_NAME_CHECKSUM filenames."
+                    ),
                 )
                 errors.append(self._failed_item("text_embeddings", annotation, error))
                 self.registry.emit(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import logging
 import sys
@@ -23,6 +24,13 @@ from langfeat_analysis.io import atomic_json_dump
 
 
 DEFAULT_CONFIG = Path.cwd() / "configs" / "preproc.yaml"
+OUTPUT_SUBDIRECTORIES = {
+    "audio_features": Path("audio/features"),
+    "acoustic_phonetics": Path("audio/phonetics"),
+    "audio_embeddings": Path("audio/embeddings"),
+    "transcripts": Path("transcripts"),
+    "text_embeddings": Path("text/embeddings"),
+}
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -30,6 +38,36 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--config", type=Path, default=DEFAULT_CONFIG, help="Pipeline YAML file."
+    )
+    parser.add_argument(
+        "-i",
+        "--input-dir",
+        type=Path,
+        help=(
+            "Input storage root. Uses INPUT/audio and INPUT/text when those "
+            "directories exist; otherwise uses INPUT as a flat directory."
+        ),
+    )
+    parser.add_argument(
+        "-o",
+        "--output-dir",
+        type=Path,
+        help="Output root for all process-specific results and logs.",
+    )
+    parser.add_argument(
+        "--audio-input-dir",
+        type=Path,
+        help="Override the audio directory inferred from --input-dir.",
+    )
+    parser.add_argument(
+        "--annotation-input-dir",
+        type=Path,
+        help="Override the annotation directory inferred from --input-dir.",
+    )
+    parser.add_argument(
+        "--log-dir",
+        type=Path,
+        help="Override the registry directory (defaults to OUTPUT/logs with -o).",
     )
     parser.add_argument(
         "--only",
@@ -58,6 +96,108 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Also write the final machine-readable report to this JSON file.",
     )
     return parser.parse_args(argv)
+
+
+def _modality_directory(root: Path, modality: str) -> Path:
+    """Use ``root/modality`` when present, otherwise retain a flat root."""
+    candidate = root / modality
+    return candidate if candidate.is_dir() else root
+
+
+def apply_directory_overrides(
+    config: dict[str, Any],
+    config_dir: Path,
+    *,
+    input_dir: Path | None = None,
+    output_dir: Path | None = None,
+    audio_input_dir: Path | None = None,
+    annotation_input_dir: Path | None = None,
+    log_dir: Path | None = None,
+) -> dict[str, Any]:
+    """Apply CLI path overrides without modifying the loaded YAML mapping.
+
+    ``input_dir`` follows the layout produced by ``collect-stimuli.sh``:
+    ``INPUT/audio`` contains stimuli and ``INPUT/text`` contains annotations.
+    Explicit modality arguments take precedence over this inference.
+    """
+    updated = copy.deepcopy(config)
+    processes = updated["processes"]
+
+    input_root = input_dir.expanduser().resolve() if input_dir else None
+    audio_dir = (
+        audio_input_dir.expanduser().resolve()
+        if audio_input_dir
+        else _modality_directory(input_root, "audio")
+        if input_root
+        else None
+    )
+    annotation_dir = (
+        annotation_input_dir.expanduser().resolve()
+        if annotation_input_dir
+        else _modality_directory(input_root, "text")
+        if input_root
+        else None
+    )
+
+    if audio_dir is not None:
+        for name in ("audio_features", "acoustic_phonetics", "audio_embeddings", "transcripts"):
+            if name in processes:
+                processes[name]["input"] = {
+                    "directory": str(audio_dir),
+                    "patterns": ["*.wav", "*.WAV"],
+                }
+        if "text_embeddings" in processes:
+            processes["text_embeddings"]["input"]["stimuli"] = {
+                "directory": str(audio_dir),
+                "patterns": ["*.wav", "*.WAV"],
+            }
+
+    if annotation_dir is not None and "text_embeddings" in processes:
+        processes["text_embeddings"]["input"]["annotations"] = {
+            "directory": str(annotation_dir),
+            "patterns": ["*.csv", "*.CSV", "*.tsv", "*.TSV", "*.textgrid", "*.TextGrid"],
+        }
+        processes["text_embeddings"]["input"].setdefault("matching", {})[
+            "strategy"
+        ] = "auto"
+
+    resolved_output = output_dir.expanduser().resolve() if output_dir else None
+    if resolved_output is not None:
+        old_transcript_output = None
+        old_annotation_input = None
+        if "transcripts" in processes:
+            old_transcript_output = resolve_path(
+                processes["transcripts"]["output"]["directory"], config_dir
+            )
+        if "text_embeddings" in processes and input_root is None and annotation_input_dir is None:
+            old_annotation_input = resolve_path(
+                processes["text_embeddings"]["input"]["annotations"]["directory"],
+                config_dir,
+            )
+
+        for name, relative in OUTPUT_SUBDIRECTORIES.items():
+            if name in processes:
+                processes[name]["output"]["directory"] = str(
+                    resolved_output / relative
+                )
+
+        # Preserve an existing transcript -> text-embedding dependency when
+        # only the output root changes.
+        if (
+            old_transcript_output is not None
+            and old_annotation_input == old_transcript_output
+            and "text_embeddings" in processes
+        ):
+            processes["text_embeddings"]["input"]["annotations"]["directory"] = str(
+                resolved_output / OUTPUT_SUBDIRECTORIES["transcripts"]
+            )
+        updated.setdefault("logging", {})["directory"] = str(resolved_output / "logs")
+
+    if log_dir is not None:
+        updated.setdefault("logging", {})["directory"] = str(
+            log_dir.expanduser().resolve()
+        )
+    return updated
 
 
 def build_plan(
@@ -131,6 +271,15 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     try:
         config, config_dir = load_config(args.config)
+        config = apply_directory_overrides(
+            config,
+            config_dir,
+            input_dir=args.input_dir,
+            output_dir=args.output_dir,
+            audio_input_dir=args.audio_input_dir,
+            annotation_input_dir=args.annotation_input_dir,
+            log_dir=args.log_dir,
+        )
         if args.dry_run:
             print(json.dumps(build_plan(config, config_dir, args.only), indent=2))
             return 0

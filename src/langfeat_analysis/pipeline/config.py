@@ -107,6 +107,12 @@ def validate_config(config: Any, path: Path | None = None) -> None:
                 raise ConfigurationError(
                     "processes.text_embeddings.settings.model_name is required."
                 )
+            strategy = input_config.get("matching", {}).get("strategy", "stem")
+            if strategy not in {"stem", "collector", "auto"}:
+                raise ConfigurationError(
+                    "processes.text_embeddings.input.matching.strategy must be "
+                    "'stem', 'collector', or 'auto'."
+                )
 
 
 def _positive_number(value: Any, field: str) -> float:
@@ -153,14 +159,31 @@ def discover_files(
         directory = resolve_path(directory_value, config_dir)
         if not directory.is_dir():
             raise InputError(f"{label} directory does not exist: {directory}")
-        pattern = specification.get("pattern", "*")
-        if not isinstance(pattern, str) or not pattern:
-            raise ConfigurationError(f"{label}.pattern must be a non-empty string.")
-        paths = sorted(path for path in directory.glob(pattern) if path.is_file())
+        configured_patterns = specification.get("patterns")
+        if configured_patterns is None:
+            configured_patterns = [specification.get("pattern", "*")]
+        if (
+            not isinstance(configured_patterns, list)
+            or not configured_patterns
+            or not all(isinstance(pattern, str) and pattern for pattern in configured_patterns)
+        ):
+            raise ConfigurationError(
+                f"{label}.patterns must be a non-empty list of glob strings."
+            )
+        paths = sorted(
+            {
+                path
+                for pattern in configured_patterns
+                for path in directory.glob(pattern)
+                if path.is_file()
+            }
+        )
 
     if not paths and not allow_empty:
-        pattern = specification.get("pattern", "explicit files")
-        raise InputError(f"{label} resolved no files (selection: {pattern!r}).")
+        selection = specification.get(
+            "patterns", specification.get("pattern", "explicit files")
+        )
+        raise InputError(f"{label} resolved no files (selection: {selection!r}).")
     return paths
 
 
