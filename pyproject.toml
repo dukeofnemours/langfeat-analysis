@@ -21,7 +21,7 @@ dependencies = [
 audio = [
   "librosa>=0.11",
   "matplotlib>=3.9",
-  "natural-features @ git+https://github.com/dukeofnemours/natural-features.git@9d205df72d1178d32b2558614deb18c6b5a09bf8",
+  "natural-features @ https://github.com/dukeofnemours/natural-features/releases/download/v0.0.1/natural_features-0.0.1-py3-none-any.whl",
   "openl3>=0.4.2",
   "torch>=2.4",
   "transformers>=4.40",
