@@ -1,0 +1,9 @@
+[submodule "dependencies/natural-features"]
+	path = dependencies/natural-features
+	url = https://github.com/dukeofnemours/natural-features.git
+[submodule "dependencies/openl3"]
+	path = dependencies/openl3
+	url = https://github.com/marl/openl3.git
+[submodule "dependencies/rriscripts"]
+	path = dependencies/rriscripts
+	url = https://github.com/bbuchsbaum/rriscripts.git
