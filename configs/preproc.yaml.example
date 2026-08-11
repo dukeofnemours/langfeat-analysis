@@ -4,13 +4,6 @@ version: 1
 defaults:
   tr_s: 1.0
 
-# Populate this directory while online with `lafa --cache-models`. Set offline
-# to true (or pass --offline) to verify the cache before model initialization
-# and prevent Hugging Face network access during the pipeline.
-models:
-  cache_directory: ../model-cache
-  offline: false
-
 # Batch items are isolated: a failed stimulus is logged and the next stimulus
 # still runs. Set continue_on_error to false (or pass --fail-fast) to stop early.
 batch:
@@ -38,7 +31,7 @@ processes:
       directory: ../outputs/audio/features
       file_template: "{title}.json"
     settings:
-      features: [mfcc, mel, vad]
+      features: [mfcc, mel, vad] # May select among features listed here [rms, mfcc, mel, spectral_stats, vad, opensmile_egemaps]
 
   acoustic_phonetics:
     enabled: true
@@ -53,12 +46,6 @@ processes:
         posterior_backend: ctc
         ctc_model: bobboyms/wav2vec2-base-en-phoneme-ctc-41h
         ctc_local_files_only: true
-        # auto prefers CUDA, then Apple MPS, and falls back to CPU.
-        ctc_device: auto
-        # Long stimuli are split into model-safe chunks. CUDA processes four,
-        # MPS two, and CPU one per forward pass when batch size is null.
-        ctc_chunk_seconds: 30.0
-        ctc_batch_size: null
         include_uncertainty: true
         renormalize_posteriors: true
 
@@ -76,32 +63,13 @@ processes:
         input_repr: linear
         center: false
         embedding_size: 512
-        frontend: kapre
-        # TensorFlow device selection is independent from ctc_device.
-        tensorflow_device: auto
-        inference_batch_size: 16
-        stimulus_batch_size: 2
-        max_stimulus_batch_seconds: 300.0
-        memory_fallback: true
         verbose: false
 
   transcripts:
     enabled: true
     input:
-      audio:
-        directory: ../scripts/audio/tests
-        pattern: "*.wav"
-      existing_transcripts:
-        directory: ../scripts/text/tests
-        patterns: ["*.csv", "*.tsv", "*.txt", "*.textgrid", "*.TextGrid", "*.eaf"]
-      matching:
-        # Accept only a unique best normalized-filename match.
-        threshold: 0.72
-        min_margin: 0.05
-        # If original audio/text counts for an alias are equal, make a 1:1
-        # assignment below threshold while still enforcing this safety floor.
-        alias_count_heuristic: true
-        alias_min_score: 0.35
+      directory: ../scripts/audio/tests
+      pattern: "*.wav"
     output:
       directory: ../outputs/transcripts
       file_template: "{stimulus}-annotations.csv"
@@ -134,5 +102,5 @@ processes:
       file_template: "{title}.json"
     settings:
       model_name: sentence-transformers/all-MiniLM-L6-v2
-      context_window: 3
+      context_window: 3 # How many previous chunks of text should be joint to the current chunk prior to embedding.
       strict_annotations: false
