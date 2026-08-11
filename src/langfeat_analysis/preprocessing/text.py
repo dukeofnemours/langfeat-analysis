@@ -33,6 +33,28 @@ Backend = Literal["cuda", "mps", "cpu"]
 _SENTENCE_MODEL_CACHE: dict[str, Any] = {}
 
 
+def preload_sentence_model(model_name: str) -> Any:
+    """Load and cache one SentenceTransformer model before item processing."""
+    model = _SENTENCE_MODEL_CACHE.get(model_name)
+    if model is None:
+        from sentence_transformers import SentenceTransformer
+
+        model = SentenceTransformer(model_name)
+        _SENTENCE_MODEL_CACHE[model_name] = model
+    return model
+
+
+def unload_sentence_model(model_name: str) -> None:
+    """Remove a cached SentenceTransformer and release PyTorch caches."""
+    model = _SENTENCE_MODEL_CACHE.pop(model_name, None)
+    if model is not None and hasattr(model, "to"):
+        model.to("cpu")
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    if torch.backends.mps.is_available():
+        torch.mps.empty_cache()
+
+
 
 @dataclass
 class TextProcessedData:
@@ -229,6 +251,11 @@ class TranscriptGenerator:
             self._load_mlx_models()
         else:
             self._load_pytorch_models()
+
+    def preload_models(self) -> str:
+        """Load ASR and alignment models once and return the selected backend."""
+        self._load_models()
+        return self.backend
 
     def _load_mlx_models(self) -> None:
         """
@@ -810,16 +837,11 @@ class TextEmbedderGrid:
 
     def _contextual_embeddings(self, phrases: Sequence[str]) -> np.ndarray:
         """Embed rolling windows of frame-level phrases as feature-by-time data."""
-        from sentence_transformers import SentenceTransformer
-
         sentences = [
             " ".join(phrases[max(0, i - self.context_window + 1) : i + 1]).strip()
             for i in range(len(phrases))
         ]
-        model = _SENTENCE_MODEL_CACHE.get(self.model_name)
-        if model is None:
-            model = SentenceTransformer(self.model_name)
-            _SENTENCE_MODEL_CACHE[self.model_name] = model
+        model = preload_sentence_model(self.model_name)
         return np.asarray(model.encode(sentences)).T
 
     def _build_record(

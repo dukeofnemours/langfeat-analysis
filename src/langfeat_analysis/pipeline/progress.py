@@ -32,6 +32,29 @@ class TerminalReporter:
         """Report that a process is resolving inputs or initializing models."""
         self._write(f"[PENDING] {process}: resolving inputs and preparing resources")
 
+    def model_pending(self, process: str, model: str) -> None:
+        """Report that a reusable model is being loaded before item processing."""
+        self._write(f"[PENDING] {process}: loading model {model}")
+
+    def model_finished(
+        self, process: str, model: str, status: str, *, detail: str = ""
+    ) -> None:
+        """Report the terminal state of model initialization."""
+        label = "SUCCESS" if status == "success" else "FAILED"
+        suffix = f" — {self._compact_error(detail)}" if detail else ""
+        self._write(f"[{label}] {process}: model {model}{suffix}")
+
+    def chunk_progress(
+        self, process: str, input_path: str | Path, completed: int, total: int
+    ) -> None:
+        """Report intra-stimulus progress for chunked model inference."""
+        fraction = completed / total if total else 1.0
+        filename = Path(input_path).name
+        self._write(
+            f"[PROGRESS] {process}: {filename} chunks "
+            f"{completed}/{total} ({fraction:.0%})"
+        )
+
     def items_pending(self, process: str, total: int) -> None:
         """Initialize a progress bar for a process's independently run items."""
         self._process = process
@@ -49,6 +72,7 @@ class TerminalReporter:
         *,
         output_count: int = 0,
         error_message: str = "",
+        skip_message: str = "",
     ) -> None:
         """Advance the bar and report one item's terminal state."""
         if process != self._process:
@@ -58,6 +82,9 @@ class TerminalReporter:
         if status == "success":
             suffix = f" ({output_count} output{'s' if output_count != 1 else ''})"
             self._write(f"[SUCCESS] {process}: {filename}{suffix}")
+        elif status == "skipped":
+            detail = self._compact_error(skip_message or "already has a transcript")
+            self._write(f"[SKIPPED] {process}: {filename} — {detail}")
         else:
             detail = self._compact_error(error_message)
             self._write(f"[FAILED] {process}: {filename} — {detail}")
@@ -70,19 +97,28 @@ class TerminalReporter:
         succeeded: int,
         failed: int,
         *,
+        skipped: int = 0,
         error_message: str = "",
     ) -> None:
         """Report the aggregate outcome of one process."""
         status = "SUCCESS" if failed == 0 else "FAILED"
-        message = f"[{status}] {process}: {succeeded} succeeded, {failed} failed"
+        skipped_text = f", {skipped} skipped" if skipped else ""
+        message = (
+            f"[{status}] {process}: {succeeded} succeeded"
+            f"{skipped_text}, {failed} failed"
+        )
         if error_message:
             message += f" — {self._compact_error(error_message)}"
         self._write(message)
 
-    def pipeline_finished(self, succeeded: int, failed: int) -> None:
+    def pipeline_finished(self, succeeded: int, failed: int, skipped: int = 0) -> None:
         """Report the final batch outcome."""
         status = "SUCCESS" if failed == 0 else "FAILED"
-        self._write(f"[{status}] Pipeline: {succeeded} succeeded, {failed} failed")
+        skipped_text = f", {skipped} skipped" if skipped else ""
+        self._write(
+            f"[{status}] Pipeline: {succeeded} succeeded"
+            f"{skipped_text}, {failed} failed"
+        )
 
     def pipeline_interrupted(self) -> None:
         """Report an interrupt without pretending that remaining work completed."""

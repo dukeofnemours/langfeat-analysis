@@ -51,6 +51,14 @@ def validate_config(config: Any, path: Path | None = None) -> None:
             f"{label} must declare supported schema 'version: 1', "
             f"got {config.get('version')!r}."
         )
+    models = config.get("models", {})
+    if not isinstance(models, dict):
+        raise ConfigurationError("'models' must be a mapping.")
+    if "offline" in models and not isinstance(models["offline"], bool):
+        raise ConfigurationError("models.offline must be true or false.")
+    cache_directory = models.get("cache_directory")
+    if cache_directory is not None and not isinstance(cache_directory, (str, Path)):
+        raise ConfigurationError("models.cache_directory must be a filesystem path.")
     processes = config.get("processes")
     if not isinstance(processes, dict) or not processes:
         raise ConfigurationError(f"{label} requires a non-empty 'processes' mapping.")
@@ -95,6 +103,107 @@ def validate_config(config: Any, path: Path | None = None) -> None:
             if not isinstance(features, list) or not features:
                 raise ConfigurationError(
                     "processes.audio_features.settings.features must be a non-empty list."
+                )
+        if name == "acoustic_phonetics":
+            options = settings.get("extractor_options", {})
+            if not isinstance(options, dict):
+                raise ConfigurationError(
+                    "processes.acoustic_phonetics.settings.extractor_options "
+                    "must be a mapping."
+                )
+            device = options.get("ctc_device", "auto")
+            if device not in {"auto", "cuda", "mps", "cpu"}:
+                raise ConfigurationError(
+                    "processes.acoustic_phonetics.settings.extractor_options."
+                    "ctc_device must be auto, cuda, mps, or cpu."
+                )
+            if "ctc_chunk_seconds" in options:
+                _positive_number(
+                    options["ctc_chunk_seconds"],
+                    "processes.acoustic_phonetics.settings.extractor_options."
+                    "ctc_chunk_seconds",
+                )
+            batch_size = options.get("ctc_batch_size")
+            if batch_size is not None and (
+                isinstance(batch_size, bool)
+                or not isinstance(batch_size, int)
+                or batch_size <= 0
+            ):
+                raise ConfigurationError(
+                    "processes.acoustic_phonetics.settings.extractor_options."
+                    "ctc_batch_size must be a positive integer or null."
+                )
+        if name == "audio_embeddings":
+            options = settings.get("embedding_options", {})
+            if not isinstance(options, dict):
+                raise ConfigurationError(
+                    "processes.audio_embeddings.settings.embedding_options "
+                    "must be a mapping."
+                )
+            if options.get("tensorflow_device", "auto") not in {"auto", "gpu", "cpu"}:
+                raise ConfigurationError(
+                    "processes.audio_embeddings.settings.embedding_options."
+                    "tensorflow_device must be auto, gpu, or cpu."
+                )
+            for key in ("inference_batch_size", "stimulus_batch_size"):
+                value = options.get(key)
+                if value is not None and (
+                    isinstance(value, bool) or not isinstance(value, int) or value <= 0
+                ):
+                    raise ConfigurationError(
+                        "processes.audio_embeddings.settings.embedding_options."
+                        f"{key} must be a positive integer."
+                    )
+            if "max_stimulus_batch_seconds" in options:
+                _positive_number(
+                    options["max_stimulus_batch_seconds"],
+                    "processes.audio_embeddings.settings.embedding_options."
+                    "max_stimulus_batch_seconds",
+                )
+            if "memory_fallback" in options and not isinstance(
+                options["memory_fallback"], bool
+            ):
+                raise ConfigurationError(
+                    "processes.audio_embeddings.settings.embedding_options."
+                    "memory_fallback must be true or false."
+                )
+        if name == "transcripts":
+            input_config = process["input"]
+            if "audio" in input_config and not isinstance(input_config["audio"], dict):
+                raise ConfigurationError(
+                    "processes.transcripts.input.audio must be a mapping."
+                )
+            existing = input_config.get("existing_transcripts")
+            if existing is not None and not isinstance(existing, dict):
+                raise ConfigurationError(
+                    "processes.transcripts.input.existing_transcripts must be a mapping."
+                )
+            matching = input_config.get("matching", {})
+            if not isinstance(matching, dict):
+                raise ConfigurationError(
+                    "processes.transcripts.input.matching must be a mapping."
+                )
+            for key, default in (
+                ("threshold", 0.72),
+                ("min_margin", 0.05),
+                ("alias_min_score", 0.35),
+            ):
+                try:
+                    value = float(matching.get(key, default))
+                except (TypeError, ValueError) as error:
+                    raise ConfigurationError(
+                        f"processes.transcripts.input.matching.{key} must be a number."
+                    ) from error
+                if not 0.0 <= value <= 1.0:
+                    raise ConfigurationError(
+                        f"processes.transcripts.input.matching.{key} must be between 0 and 1."
+                    )
+            if "alias_count_heuristic" in matching and not isinstance(
+                matching["alias_count_heuristic"], bool
+            ):
+                raise ConfigurationError(
+                    "processes.transcripts.input.matching.alias_count_heuristic "
+                    "must be true or false."
                 )
         if name == "text_embeddings":
             input_config = process["input"]

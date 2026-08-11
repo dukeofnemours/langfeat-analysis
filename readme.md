@@ -41,6 +41,29 @@ lafa --only audio_features --only audio_embeddings
 lafa --report outputs/preproc-report.json
 ```
 
+Prepare model weights for an offline environment without initializing the
+pipeline or touching stimulus inputs:
+
+```bash
+lafa --config configs/preproc.yaml --cache-models
+lafa --config configs/preproc.yaml --verify-model-cache
+```
+
+The cache location comes from `models.cache_directory` and can be overridden
+with `--model-cache-dir`. Copy that directory to the offline machine, retain
+the same YAML path (or override it), and run:
+
+```bash
+lafa --config configs/preproc.yaml --offline
+```
+
+Offline mode verifies every selected model before pipeline initialization and
+sets the Hugging Face offline flags. Cache preparation covers the CTC model,
+the platform-selected Qwen ASR/aligner pair, and SentenceTransformer. OpenL3
+weights are bundled with its package, so preparation verifies their presence
+rather than downloading a second copy. `--only` limits caching and verification
+to the named processes.
+
 The legacy invocation remains available:
 
 ```bash
@@ -52,6 +75,27 @@ stimulus receives a failed item result while later stimuli continue. The CLI
 still exits with status 1 for partial failure so schedulers detect it; pass
 `--allow-partial-success` only when a zero exit status is explicitly desired.
 Use `--fail-fast` to override the YAML for a particular run.
+
+### Existing transcript matching
+
+The transcription process first compares every audio filename with existing
+CSV, TSV, TXT, TextGrid, and EAF filenames. Collector `audio`/`text` markers,
+path-checksum suffixes, annotation suffixes, separators, and letter/number
+boundaries are normalized before scoring. A transcript is accepted only when
+its score meets `transcripts.input.matching.threshold` and it leads the
+runner-up by `min_margin`. Conflicting section or episode numbers are strongly
+penalized. Each transcript can satisfy at most one audio file.
+
+As a fallback, filenames are grouped by their alias (the part before the first
+underscore). When the original audio and text counts for an alias are equal,
+the matcher computes the highest-scoring one-to-one assignment for the
+remaining files. Those pairs may fall below `threshold`, but must still meet
+`alias_min_score`. Set `alias_count_heuristic: false` to disable this fallback.
+
+Validated matches are emitted as `[SKIPPED]` and linked in the JSONL event. Only
+unmatched or ambiguous audio is sent to ASR. When every audio has a transcript,
+the transcription and alignment models are not loaded or added to model-cache
+preparation.
 
 ### Terminal feedback
 
@@ -104,8 +148,8 @@ excluded by the CLI override patterns rather than failing unrelated batch items.
 
 ## Failure messages and safeguards
 
-Configuration and input discovery happen before model loading. Errors identify
-the process, input path, concrete cause, and usually a corrective hint. Output
+Configuration validation happens before model loading. Errors identify the
+process, input path, concrete cause, and usually a corrective hint. Output
 JSON and CSV files are written through an adjacent temporary file and moved
 atomically into place, preventing truncated final files. Unsafe output templates
 that try to create directories are rejected.
@@ -114,6 +158,26 @@ The current runner intentionally uses one worker. ASR and embedding models are
 reused within a batch but are not safe to share across worker processes. A
 configuration requesting more than one worker fails validation with this
 explanation instead of silently risking accelerator errors.
+
+When `acoustic_phonetics` uses the CTC backend, its processor and model are
+loaded once before any stimulus is processed. `ctc_device: auto` prefers CUDA,
+then Apple MPS, and otherwise uses CPU. Each stimulus is divided according to
+`ctc_chunk_seconds`; `ctc_batch_size: null` selects four concurrent chunks on
+CUDA, two on MPS, and sequential inference on CPU. Lower either setting if an
+accelerator reports insufficient memory. Model loading and per-stimulus chunk
+progress are displayed in the terminal and recorded in the JSONL registry.
+
+Every enabled model-backed process is preloaded during pipeline startup. The
+order is acoustic CTC, OpenL3, transcription/forced alignment, then the
+SentenceTransformer model. Signal-only `audio_features` needs no model.
+
+OpenL3 has an independent TensorFlow device policy: `tensorflow_device: auto`
+uses a TensorFlow GPU when one is visible and otherwise uses CPU. It does not
+inherit `ctc_device` or PyTorch MPS/CUDA state. `inference_batch_size` controls
+Keras prediction batches; `stimulus_batch_size` and
+`max_stimulus_batch_seconds` bound multi-stimulus groups. If TensorFlow reports
+an out-of-memory error and `memory_fallback` is enabled, the pipeline retries
+stimuli sequentially and halves the inference batch until it reaches one.
 
 ## JSONL event registry
 
@@ -125,11 +189,16 @@ event/status, process and input/output paths, duration, and exception details.
 Typical lifecycle events are:
 
 ```text
+model_cache_started
+model_cache_completed | model_cache_failed
 pipeline_started
+model_load_started
+model_load_completed | model_load_failed
+model_load_skipped
 process_started
 item_started
 file_created
-item_completed | item_failed
+item_completed | item_skipped | item_failed
 process_completed | process_failed
 pipeline_completed | pipeline_failed
 ```

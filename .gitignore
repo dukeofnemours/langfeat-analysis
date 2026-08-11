@@ -6,6 +6,7 @@ __pycache__/
 .env
 venv*/
 outputs/
+model-cache/
 logs/*.jsonl
 !logs/.gitkeep
 samples/

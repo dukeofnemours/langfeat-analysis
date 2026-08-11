@@ -81,6 +81,27 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Validate configuration and display resolved I/O without model loading.",
     )
+    cache_mode = parser.add_mutually_exclusive_group()
+    cache_mode.add_argument(
+        "--cache-models",
+        action="store_true",
+        help="Download/cache models required by enabled processes, then exit.",
+    )
+    cache_mode.add_argument(
+        "--verify-model-cache",
+        action="store_true",
+        help="Verify all required models are locally cached, without network access.",
+    )
+    parser.add_argument(
+        "--model-cache-dir",
+        type=Path,
+        help="Override models.cache_directory for caching and pipeline execution.",
+    )
+    parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="Verify the model cache, disable Hugging Face network access, then run.",
+    )
     parser.add_argument(
         "--fail-fast",
         action="store_true",
@@ -146,12 +167,21 @@ def apply_directory_overrides(
     )
 
     if audio_dir is not None:
-        for name in ("audio_features", "acoustic_phonetics", "audio_embeddings", "transcripts"):
+        for name in ("audio_features", "acoustic_phonetics", "audio_embeddings"):
             if name in processes:
                 processes[name]["input"] = {
                     "directory": str(audio_dir),
                     "patterns": ["*.wav", "*.WAV"],
                 }
+        if "transcripts" in processes:
+            transcript_input = processes["transcripts"].setdefault("input", {})
+            if "audio" not in transcript_input:
+                transcript_input = {"audio": dict(transcript_input)}
+                processes["transcripts"]["input"] = transcript_input
+            transcript_input["audio"] = {
+                "directory": str(audio_dir),
+                "patterns": ["*.wav", "*.WAV"],
+            }
         if "text_embeddings" in processes:
             processes["text_embeddings"]["input"]["stimuli"] = {
                 "directory": str(audio_dir),
@@ -166,6 +196,16 @@ def apply_directory_overrides(
         processes["text_embeddings"]["input"].setdefault("matching", {})[
             "strategy"
         ] = "auto"
+    if annotation_dir is not None and "transcripts" in processes:
+        processes["transcripts"].setdefault("input", {})[
+            "existing_transcripts"
+        ] = {
+            "directory": str(annotation_dir),
+            "patterns": [
+                "*.csv", "*.CSV", "*.tsv", "*.TSV", "*.txt", "*.TXT",
+                "*.textgrid", "*.TextGrid", "*.eaf", "*.EAF",
+            ],
+        }
 
     resolved_output = output_dir.expanduser().resolve() if output_dir else None
     if resolved_output is not None:
@@ -238,6 +278,21 @@ def build_plan(
                     label="processes.text_embeddings.input.stimuli",
                 )
             ]
+        elif name == "transcripts":
+            input_config = process["input"]
+            audio_spec = input_config.get("audio", input_config)
+            item["inputs"] = [
+                str(path)
+                for path in discover_files(
+                    audio_spec,
+                    config_dir,
+                    label="processes.transcripts.input.audio",
+                )
+            ]
+            item["existing_transcripts"] = input_config.get(
+                "existing_transcripts", {}
+            )
+            item["matching"] = input_config.get("matching", {})
         else:
             item["inputs"] = [
                 str(path)
@@ -286,6 +341,20 @@ def main(argv: list[str] | None = None) -> int:
             annotation_input_dir=args.annotation_input_dir,
             log_dir=args.log_dir,
         )
+        if args.model_cache_dir is not None:
+            config.setdefault("models", {})["cache_directory"] = str(
+                args.model_cache_dir.expanduser().resolve()
+            )
+        if args.offline:
+            config.setdefault("models", {})["offline"] = True
+        if args.cache_models and args.offline:
+            raise ConfigurationError(
+                "--cache-models requires network access and cannot be combined with --offline."
+            )
+        if args.dry_run and (args.cache_models or args.verify_model_cache):
+            raise ConfigurationError(
+                "--dry-run cannot be combined with a model cache operation."
+            )
         if args.dry_run:
             print(json.dumps(build_plan(config, config_dir, args.only), indent=2))
             return 0
@@ -294,6 +363,42 @@ def main(argv: list[str] | None = None) -> int:
             config.setdefault("batch", {})["continue_on_error"] = False
         registry = create_registry(config, config_dir)
         reporter = TerminalReporter(enabled=not args.quiet)
+        from langfeat_analysis.pipeline.model_cache import (
+            cache_models,
+            configure_model_cache_environment,
+        )
+
+        if args.cache_models or args.verify_model_cache:
+            cached = cache_models(
+                config,
+                config_dir,
+                registry,
+                reporter,
+                selected=args.only,
+                download=args.cache_models,
+            )
+            payload = {
+                "status": "success",
+                "mode": "cache" if args.cache_models else "verify",
+                "models": [vars(item) for item in cached],
+                "log_path": str(registry.path),
+            }
+            if args.report:
+                _write_report(args.report, payload)
+            print(json.dumps(payload, indent=2))
+            return 0
+
+        offline = bool(config.get("models", {}).get("offline", False))
+        configure_model_cache_environment(config, config_dir, offline=offline)
+        if offline:
+            cache_models(
+                config,
+                config_dir,
+                registry,
+                reporter,
+                selected=args.only,
+                download=False,
+            )
         report = BatchPipeline(config, config_dir, registry, reporter).run(args.only)
         payload = report.to_dict()
         if args.report:
