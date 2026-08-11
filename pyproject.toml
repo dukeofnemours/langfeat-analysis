@@ -4,14 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "langfeat-analysis"
-version = "0.2.0"
+version = "0.2.1"
 description = "Batch-safe, stimulus-aligned language and audio feature pipelines"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.12"
 license = "MIT"
 authors = [{ name = "Damien Kemka Douanla" }]
 dependencies = [
+  "huggingface-hub>=0.23",
   "numpy>=2.0",
+  "openl3>=0.4.2",
   "pandas>=2.2",
   "PyYAML>=6.0",
   "soundfile>=0.12",
@@ -22,7 +24,6 @@ audio = [
   "librosa>=0.11",
   "matplotlib>=3.9",
   "natural-features @ https://github.com/dukeofnemours/natural-features/releases/download/v0.0.1/natural_features-0.0.1-py3-none-any.whl",
-  "openl3>=0.4.2",
   "torch>=2.4",
   "transformers>=4.40",
 ]
