@@ -4,36 +4,37 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "langfeat-analysis"
-version = "0.2.1"
+version = "0.2.2"
 description = "Batch-safe, stimulus-aligned language and audio feature pipelines"
 readme = "README.md"
 requires-python = ">=3.11,<3.12"
 license = "MIT"
 authors = [{ name = "Damien Kemka Douanla" }]
 dependencies = [
+  "DyNet38 @ https://files.pythonhosted.org/packages/fd/c3/46f879632262817aced0889c15c694d327173b3f75467994201d9ddc1f38/dyNET38-2.2-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl ; platform_system == 'Linux' and platform_machine == 'x86_64'",
   "huggingface-hub>=0.23",
+  "librosa>=0.11",
+  "matplotlib>=3.9",
+  "mlx-audio>=0.4.5; platform_system == 'Darwin'",
+  "natural-features @ https://github.com/dukeofnemours/natural-features/releases/download/v0.0.1/natural_features-0.0.1-py3-none-any.whl",
   "numpy>=2.0",
   "openl3>=0.4.2",
   "pandas>=2.2",
   "PyYAML>=6.0",
+  "qwen-asr>=0.0.6; platform_system != 'Darwin'",
+  "sentence-transformers>=3.0",
+  "setuptools<81",
   "soundfile>=0.12",
+  "tf-keras==2.20.1",
+  "torch>=2.4",
+  "transformers==4.57.6; platform_system != 'Darwin'",
+  "transformers>=5.5,<5.13; platform_system == 'Darwin'",
 ]
 
 [project.optional-dependencies]
-audio = [
-  "librosa>=0.11",
-  "matplotlib>=3.9",
-  "natural-features @ https://github.com/dukeofnemours/natural-features/releases/download/v0.0.1/natural_features-0.0.1-py3-none-any.whl",
-  "torch>=2.4",
-  "transformers>=4.40",
-]
-text = [
-  "librosa>=0.11",
-  "mlx-audio>=0.4.5; platform_system == 'Darwin'",
-  "torch>=2.4",
-  "qwen-asr>=0.0.6",
-  "sentence-transformers>=3.0",
-]
+# Compatibility aliases. All runtime dependencies are installed by default.
+audio = []
+text = []
 dev = [
   "pytest>=8.0",
 ]

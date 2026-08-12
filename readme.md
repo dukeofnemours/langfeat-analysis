@@ -23,23 +23,18 @@ tests/                                        # lightweight pipeline/registry te
 
 The recommended server installation uses `pipx`, which keeps `lafa` in an
 isolated environment and makes the command available from any repository.
-Release 0.2.1 targets Python 3.11 because upstream OpenL3 0.4.2 does not build
+Release 0.2.2 targets Python 3.11 because upstream OpenL3 0.4.2 does not build
 on Python 3.12 or newer.
-Run exactly one of the installation commands below. Every installation includes
-`huggingface-hub` and OpenL3 so model caching works in the pipx environment;
-choose extras only for the processing backends you intend to run:
+Every installation includes the complete runtime: model caching, CTC phonetics,
+OpenL3, Qwen transcription/alignment, and sentence-transformer embeddings.
 
 ```bash
 python3.11 -m pip install --user pipx
 python3.11 -m pipx ensurepath
 
-# Core pipeline only
+# Complete pipeline runtime
 pipx install \
-  'langfeat-analysis @ https://github.com/dukeofnemours/langfeat-analysis/releases/download/v0.2.1/langfeat_analysis-0.2.1-py3-none-any.whl'
-
-# Audio and text processes
-pipx install \
-  'langfeat-analysis[audio,text] @ https://github.com/dukeofnemours/langfeat-analysis/releases/download/v0.2.1/langfeat_analysis-0.2.1-py3-none-any.whl'
+  'langfeat-analysis @ https://github.com/dukeofnemours/langfeat-analysis/releases/download/v0.2.2/langfeat_analysis-0.2.2-py3-none-any.whl'
 ```
 
 Open a new shell after `pipx ensurepath`, or follow the path instructions it
@@ -55,7 +50,7 @@ To keep the installation inside a project instead, use a virtual environment:
 python3.11 -m venv .venv
 source .venv/bin/activate
 python -m pip install \
-  'langfeat-analysis[audio,text] @ https://github.com/dukeofnemours/langfeat-analysis/releases/download/v0.2.1/langfeat_analysis-0.2.1-py3-none-any.whl'
+  'langfeat-analysis @ https://github.com/dukeofnemours/langfeat-analysis/releases/download/v0.2.2/langfeat_analysis-0.2.2-py3-none-any.whl'
 ```
 
 Download the example configuration into the repository where the analysis will
@@ -63,26 +58,24 @@ run, then adjust its input and output paths:
 
 ```bash
 curl -fL \
-  https://raw.githubusercontent.com/dukeofnemours/langfeat-analysis/v0.2.1/configs/preproc.yaml.example \
+  https://raw.githubusercontent.com/dukeofnemours/langfeat-analysis/v0.2.2/configs/preproc.yaml.example \
   -o preproc.yaml
 lafa --config preproc.yaml --dry-run
 ```
 
 Released wheels are immutable. To install a later release with `pipx`, replace
 the version and wheel filename in the URL and run `pipx install --force ...`.
-The `audio` extra obtains `natural-features` from its own versioned wheel
-release, so installing `lafa` does not clone either source repository.
+The runtime obtains `natural-features` from its own versioned wheel release,
+and Linux x86-64 Python 3.11 installations receive a compatible DyNet38 wheel;
+installing `lafa` does not clone either source repository.
 
 ### Development installation
 
-For an editable source checkout, install only the dependencies required by the
-processes you intend to run:
+For an editable source checkout, install the complete runtime:
 
 ```bash
 python -m pip install -e .
-python -m pip install -e '.[audio]'
-python -m pip install -e '.[text]'
-python -m pip install -e '.[audio,text]'
+python -m pip install -e '.[dev]'
 ```
 
 The local development environment can also use its existing dependencies with
