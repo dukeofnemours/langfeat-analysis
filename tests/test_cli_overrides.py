@@ -101,3 +101,32 @@ def test_batch_pairing_understands_collector_filenames(tmp_path):
     pairs, errors = pipeline._match_text_inputs(process)
     assert pairs == [(annotation, audio)]
     assert errors == []
+
+
+def test_auto_pairing_normalizes_audio_text_markers_and_separators(tmp_path):
+    audio_dir = tmp_path / "audio"
+    text_dir = tmp_path / "text"
+    audio_dir.mkdir()
+    text_dir.mkdir()
+    audio = audio_dir / "lpp_audio_lppEN-section1.wav"
+    annotation = text_dir / "lpp_text_lppEN_section1.TextGrid"
+    audio.touch()
+    annotation.touch()
+    process = {
+        "input": {
+            "annotations": {"directory": str(text_dir), "pattern": "*.TextGrid"},
+            "stimuli": {"directory": str(audio_dir), "pattern": "*.wav"},
+            "matching": {"strategy": "auto"},
+        },
+        "output": {"directory": str(tmp_path / "output")},
+        "settings": {"model_name": "test"},
+    }
+    config = {"version": 1, "processes": {"text_embeddings": {"enabled": True, **process}}}
+    pipeline = BatchPipeline(
+        config, tmp_path, EventRegistry(tmp_path / "logs", filename="test.jsonl")
+    )
+
+    pairs, errors = pipeline._match_text_inputs(process)
+
+    assert pairs == [(annotation, audio)]
+    assert errors == []

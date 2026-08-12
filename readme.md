@@ -135,18 +135,26 @@ Use `--fail-fast` to override the YAML for a particular run.
 ### Existing transcript matching
 
 The transcription process first compares every audio filename with existing
-CSV, TSV, TXT, TextGrid, and EAF filenames. Collector `audio`/`text` markers,
-path-checksum suffixes, annotation suffixes, separators, and letter/number
-boundaries are normalized before scoring. A transcript is accepted only when
+CSV, TSV, TXT, TextGrid, and EAF filenames. Collector names are parsed as
+`safe_alias_kind_safe_relative_path-checksum` (the literal `*kind*` separator
+is also supported). The `kind` and path checksum are identifiers, not stimulus
+content, so they are excluded from similarity scoring. `safe_alias` must agree;
+only the two `safe_relative` source stems are scored after normalizing case,
+separators, and letter/number boundaries. A transcript is accepted only when
 its score meets `transcripts.input.matching.threshold` and it leads the
-runner-up by `min_margin`. Conflicting section or episode numbers are strongly
-penalized. Each transcript can satisfy at most one audio file.
+runner-up by `min_margin`. Explicitly conflicting language tags or section
+numbers are rejected. Each transcript can satisfy at most one audio file.
 
-As a fallback, filenames are grouped by their alias (the part before the first
-underscore). When the original audio and text counts for an alias are equal,
+As a fallback, filenames are grouped by their parsed `safe_alias`. When the
+original audio and text counts for an alias are equal,
 the matcher computes the highest-scoring one-to-one assignment for the
 remaining files. Those pairs may fall below `threshold`, but must still meet
-`alias_min_score`. Set `alias_count_heuristic: false` to disable this fallback.
+`alias_min_score`. A singleton alias group (exactly one audio and one text) may
+match below that floor when it has no explicit language or number conflict.
+This permits generic names such as `alice_text_annotations_...` to pair with
+Alice's sole audio file. Set `alias_count_heuristic: false` to disable this
+fallback. The same matcher is used by `text_embeddings` when its strategy is
+`auto`.
 
 Validated matches are emitted as `[SKIPPED]` and linked in the JSONL event. Only
 unmatched or ambiguous audio is sent to ASR. When every audio has a transcript,

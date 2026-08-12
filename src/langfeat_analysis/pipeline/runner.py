@@ -19,6 +19,87 @@ from .progress import TerminalReporter
 AUDIO_PROCESSES = {"audio_features", "acoustic_phonetics", "audio_embeddings"}
 
 
+@dataclass(frozen=True)
+class CollectorFilename:
+    """Fields encoded by ``alias_kind_source-stem_checksum.extension``."""
+
+    safe_alias: str
+    kind: str
+    safe_relative: str
+    path_checksum: str
+
+
+def parse_collector_filename(stem: str, kind: str) -> list[CollectorFilename]:
+    """Parse every valid interpretation of a collector filename stem.
+
+    Args:
+        stem: Filename without its extension.
+        kind: Expected collector modality, normally ``audio`` or ``text``.
+
+    More than one interpretation is retained because an alias or source stem
+    can itself contain ``_audio_`` or ``_text_``. Pair scoring selects the
+    interpretation whose alias and source stem agree across modalities.
+    """
+    checksum_match = re.search(r"_(\d+)$", stem)
+    if checksum_match is None:
+        return []
+    body = stem[: checksum_match.start()]
+    searchable = body.casefold()
+    marker_pattern = re.compile(
+        rf"(?:_|\*){re.escape(kind)}(?:_|\*)", re.IGNORECASE
+    )
+    parts: list[CollectorFilename] = []
+    for marker_match in marker_pattern.finditer(searchable):
+        alias = body[: marker_match.start()]
+        relative = body[marker_match.end() :]
+        if alias and relative:
+            parts.append(
+                CollectorFilename(
+                    safe_alias=alias,
+                    kind=kind.casefold(),
+                    safe_relative=relative,
+                    path_checksum=checksum_match.group(1),
+                )
+            )
+    return parts
+
+
+def _normalized_component(value: str) -> tuple[str, set[str], set[str]]:
+    """Normalize one alias/source-stem component without dropping its numbers."""
+    separated = re.sub(
+        r"(?<=[a-z])(?=\d)|(?<=\d)(?=[a-z])", " ", value.casefold()
+    )
+    tokens = set(re.findall(r"[a-z]+|\d+", separated))
+    numbers = {token for token in tokens if token.isdigit()}
+    return "".join(re.findall(r"[a-z0-9]+", separated)), tokens, numbers
+
+
+def _component_score(left: str, right: str) -> float:
+    """Score two source stems while strongly penalizing conflicting numbers."""
+    left_compact, left_tokens, left_numbers = _normalized_component(left)
+    right_compact, right_tokens, right_numbers = _normalized_component(right)
+    if not left_compact or not right_compact:
+        return 0.0
+    left_languages = {
+        value.casefold()
+        for value in re.findall(r"(?i)lpp(en|fr|cn)(?=$|[^a-z])", left)
+    }
+    right_languages = {
+        value.casefold()
+        for value in re.findall(r"(?i)lpp(en|fr|cn)(?=$|[^a-z])", right)
+    }
+    if left_languages and right_languages and left_languages != right_languages:
+        return 0.0
+    if left_numbers and right_numbers and left_numbers != right_numbers:
+        return 0.0
+
+    compact_score = SequenceMatcher(None, left_compact, right_compact).ratio()
+    union = left_tokens | right_tokens
+    token_score = len(left_tokens & right_tokens) / len(union) if union else 0.0
+    score = 0.8 * compact_score + 0.2 * token_score
+    return round(float(score), 6)
+
+
 def collector_match_keys(
     stem: str, modality: str, *, case_sensitive: bool = False
 ) -> set[str]:
@@ -28,18 +109,15 @@ def collector_match_keys(
     ``_text_``. Multiple keys are returned when those marker words also occur
     in an alias or source stem; the caller must require a unique file match.
     """
-    without_checksum = re.sub(r"_\d+$", "", stem)
-    searchable = without_checksum if case_sensitive else without_checksum.casefold()
-    marker = f"_{modality}_"
     keys: set[str] = set()
-    start = 0
-    while True:
-        index = searchable.find(marker, start)
-        if index < 0:
-            break
-        key = without_checksum[:index] + "\0" + without_checksum[index + len(marker) :]
-        keys.add(key if case_sensitive else key.casefold())
-        start = index + 1
+    for parsed in parse_collector_filename(stem, modality):
+        if case_sensitive:
+            key = f"{parsed.safe_alias}\0{parsed.safe_relative}"
+        else:
+            alias, _, _ = _normalized_component(parsed.safe_alias)
+            relative, _, _ = _normalized_component(parsed.safe_relative)
+            key = f"{alias}\0{relative}"
+        keys.add(key)
     return keys
 
 
@@ -101,7 +179,21 @@ def normalized_stimulus_name(stem: str) -> tuple[str, set[str], set[str]]:
 
 
 def transcript_filename_score(audio: Path, transcript: Path) -> float:
-    """Score filename similarity in [0, 1], penalizing conflicting numbers."""
+    """Score audio/text identity, ignoring collector kind and checksum fields."""
+    audio_parts = parse_collector_filename(audio.stem, "audio")
+    text_parts = parse_collector_filename(transcript.stem, "text")
+    if audio_parts and text_parts:
+        structured_scores = [
+            _component_score(audio_part.safe_relative, text_part.safe_relative)
+            for audio_part in audio_parts
+            for text_part in text_parts
+            if _normalized_component(audio_part.safe_alias)[0]
+            == _normalized_component(text_part.safe_alias)[0]
+        ]
+        # Collector files from different datasets must never match merely
+        # because their source stems look similar.
+        return max(structured_scores, default=0.0)
+
     audio_compact, audio_tokens, audio_numbers = normalized_stimulus_name(audio.stem)
     text_compact, text_tokens, text_numbers = normalized_stimulus_name(transcript.stem)
     if not audio_compact or not text_compact:
@@ -126,8 +218,12 @@ def _transcript_extension_priority(path: Path) -> int:
     }.get(path.suffix.casefold(), 0)
 
 
-def filename_alias(path: Path) -> str:
-    """Return the case-insensitive prefix before the first underscore."""
+def filename_alias(path: Path, kind: str | None = None) -> str:
+    """Return the normalized collector alias, with a legacy-name fallback."""
+    if kind:
+        parsed = parse_collector_filename(path.stem, kind)
+        if parsed:
+            return _normalized_component(parsed[0].safe_alias)[0]
     stem = path.stem.strip().casefold()
     return stem.split("_", maxsplit=1)[0] if "_" in stem else ""
 
@@ -240,11 +336,11 @@ def select_transcript_matches(
         original_audio_counts: dict[str, int] = {}
         original_text_counts: dict[str, int] = {}
         for path in audio_paths:
-            alias = filename_alias(path)
+            alias = filename_alias(path, "audio")
             if alias:
                 original_audio_counts[alias] = original_audio_counts.get(alias, 0) + 1
         for path in transcript_paths:
-            alias = filename_alias(path)
+            alias = filename_alias(path, "text")
             if alias:
                 original_text_counts[alias] = original_text_counts.get(alias, 0) + 1
 
@@ -255,11 +351,11 @@ def select_transcript_matches(
         audio_by_alias: dict[str, list[Path]] = {}
         text_by_alias: dict[str, list[Path]] = {}
         for path in unmatched_audio:
-            alias = filename_alias(path)
+            alias = filename_alias(path, "audio")
             if alias:
                 audio_by_alias.setdefault(alias, []).append(path)
         for path in unused_transcripts:
-            alias = filename_alias(path)
+            alias = filename_alias(path, "text")
             if alias:
                 text_by_alias.setdefault(alias, []).append(path)
 
@@ -273,7 +369,13 @@ def select_transcript_matches(
                 continue
             assignment = _best_one_to_one_assignment(alias_audio, alias_text)
             for score, audio, transcript in assignment:
-                if score < alias_min_score:
+                # A single audio and single text under the same parsed alias is
+                # strong structural evidence even if their source stems differ
+                # substantially (for example, an audio title versus
+                # ``annotations``). Explicit language/number conflicts score
+                # zero and remain rejected.
+                singleton_alias_pair = len(alias_audio) == len(alias_text) == 1
+                if score <= 0.0 or (score < alias_min_score and not singleton_alias_pair):
                     continue
                 matches[audio] = TranscriptMatch(
                     audio, transcript, score, method="equal_alias_count"
@@ -1029,7 +1131,7 @@ class BatchPipeline:
                         "reason": "validated existing transcript filename match",
                         "match_score": match.score,
                         "match_method": match.method,
-                        "alias": filename_alias(path),
+                        "alias": filename_alias(path, "audio"),
                     },
                 )
                 self.reporter.item_finished(
@@ -1154,6 +1256,7 @@ class BatchPipeline:
 
         pairs: list[tuple[Path, Path]] = []
         errors: list[ItemResult] = []
+        error_causes: dict[Path, ProcessError] = {}
         for annotation in annotations:
             stem = annotation.stem
             if suffix and normalize(stem).endswith(normalize(suffix)):
@@ -1182,13 +1285,7 @@ class BatchPipeline:
                     errors.append(
                         self._failed_item("text_embeddings", annotation, error)
                     )
-                    self.registry.emit(
-                        "item_failed",
-                        "failed",
-                        process="text_embeddings",
-                        input_path=annotation,
-                        error=error,
-                    )
+                    error_causes[annotation] = error
                     continue
             if stimulus is None:
                 error = ProcessError(
@@ -1203,15 +1300,57 @@ class BatchPipeline:
                     ),
                 )
                 errors.append(self._failed_item("text_embeddings", annotation, error))
-                self.registry.emit(
-                    "item_failed",
-                    "failed",
-                    process="text_embeddings",
-                    input_path=annotation,
-                    error=error,
-                )
+                error_causes[annotation] = error
             else:
                 pairs.append((annotation, stimulus))
+
+        # ``auto`` also uses the transcription matcher as a final filename
+        # pass. This handles ordinary collector variants such as
+        # ``lpp_audio_lppEN-section1.wav`` and
+        # ``lpp_text_lppEN_section1.TextGrid`` where marker/separator
+        # differences defeat the older exact-stem and collector-key rules.
+        if strategy == "auto" and errors:
+            matched_stimuli = {stimulus for _, stimulus in pairs}
+            unresolved = [Path(item.input_path) for item in errors]
+            candidates = [stimulus for stimulus in stimuli if stimulus not in matched_stimuli]
+            matching_options = input_config.get("matching", {})
+            filename_matches, _ = select_transcript_matches(
+                audio_paths=candidates,
+                transcript_paths=unresolved,
+                threshold=float(matching_options.get("threshold", 0.72)),
+                min_margin=float(matching_options.get("min_margin", 0.05)),
+                alias_count_heuristic=bool(
+                    matching_options.get("alias_count_heuristic", True)
+                ),
+                alias_min_score=float(matching_options.get("alias_min_score", 0.35)),
+            )
+            if filename_matches:
+                matched_annotations = {
+                    match.transcript for match in filename_matches.values()
+                }
+                errors = [
+                    item for item in errors if Path(item.input_path) not in matched_annotations
+                ]
+                for stimulus in candidates:
+                    match = filename_matches.get(stimulus)
+                    if match is not None:
+                        pairs.append((match.transcript, stimulus))
+        for item in errors:
+            error = error_causes.get(
+                Path(item.input_path),
+                ProcessError(
+                    "text_embeddings",
+                    item.input_path,
+                    "no stimulus audio matched annotation",
+                ),
+            )
+            self.registry.emit(
+                "item_failed",
+                "failed",
+                process="text_embeddings",
+                input_path=item.input_path,
+                error=error,
+            )
         return pairs, errors
 
     def _run_items(

@@ -94,9 +94,13 @@ processes:
         directory: ../scripts/audio/tests
         pattern: "*.wav"
       matching:
-        strategy: stem
+        strategy: auto
         annotation_suffix: "-annotations"
         case_sensitive: false
+        threshold: 0.72
+        min_margin: 0.05
+        alias_count_heuristic: true
+        alias_min_score: 0.35
     output:
       directory: ../outputs/text/embeddings
       file_template: "{title}.json"

@@ -216,11 +216,40 @@ def validate_config(config: Any, path: Path | None = None) -> None:
                 raise ConfigurationError(
                     "processes.text_embeddings.settings.model_name is required."
                 )
-            strategy = input_config.get("matching", {}).get("strategy", "stem")
+            matching = input_config.get("matching", {})
+            if not isinstance(matching, dict):
+                raise ConfigurationError(
+                    "processes.text_embeddings.input.matching must be a mapping."
+                )
+            strategy = matching.get("strategy", "stem")
             if strategy not in {"stem", "collector", "auto"}:
                 raise ConfigurationError(
                     "processes.text_embeddings.input.matching.strategy must be "
                     "'stem', 'collector', or 'auto'."
+                )
+            for key, default in (
+                ("threshold", 0.72),
+                ("min_margin", 0.05),
+                ("alias_min_score", 0.35),
+            ):
+                try:
+                    value = float(matching.get(key, default))
+                except (TypeError, ValueError) as error:
+                    raise ConfigurationError(
+                        "processes.text_embeddings.input.matching."
+                        f"{key} must be a number."
+                    ) from error
+                if not 0.0 <= value <= 1.0:
+                    raise ConfigurationError(
+                        "processes.text_embeddings.input.matching."
+                        f"{key} must be between 0 and 1."
+                    )
+            if "alias_count_heuristic" in matching and not isinstance(
+                matching["alias_count_heuristic"], bool
+            ):
+                raise ConfigurationError(
+                    "processes.text_embeddings.input.matching."
+                    "alias_count_heuristic must be true or false."
                 )
 
 
