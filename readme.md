@@ -23,7 +23,7 @@ tests/                                        # lightweight pipeline/registry te
 
 The recommended server installation uses `pipx`, which keeps `lafa` in an
 isolated environment and makes the command available from any repository.
-Release 0.2.2 targets Python 3.11 because upstream OpenL3 0.4.2 does not build
+Release 0.2.3 targets Python 3.11 because upstream OpenL3 0.4.2 does not build
 on Python 3.12 or newer.
 Every installation includes the complete runtime: model caching, CTC phonetics,
 OpenL3, Qwen transcription/alignment, and sentence-transformer embeddings.
@@ -34,7 +34,7 @@ python3.11 -m pipx ensurepath
 
 # Complete pipeline runtime
 pipx install \
-  'langfeat-analysis @ https://github.com/dukeofnemours/langfeat-analysis/releases/download/v0.2.2/langfeat_analysis-0.2.2-py3-none-any.whl'
+  'langfeat-analysis @ https://github.com/dukeofnemours/langfeat-analysis/releases/download/v0.2.3/langfeat_analysis-0.2.3-py3-none-any.whl'
 ```
 
 Open a new shell after `pipx ensurepath`, or follow the path instructions it
@@ -50,7 +50,7 @@ To keep the installation inside a project instead, use a virtual environment:
 python3.11 -m venv .venv
 source .venv/bin/activate
 python -m pip install \
-  'langfeat-analysis @ https://github.com/dukeofnemours/langfeat-analysis/releases/download/v0.2.2/langfeat_analysis-0.2.2-py3-none-any.whl'
+  'langfeat-analysis @ https://github.com/dukeofnemours/langfeat-analysis/releases/download/v0.2.3/langfeat_analysis-0.2.3-py3-none-any.whl'
 ```
 
 Download the example configuration into the repository where the analysis will
@@ -58,7 +58,7 @@ run, then adjust its input and output paths:
 
 ```bash
 curl -fL \
-  https://raw.githubusercontent.com/dukeofnemours/langfeat-analysis/v0.2.2/configs/preproc.yaml.example \
+  https://raw.githubusercontent.com/dukeofnemours/langfeat-analysis/v0.2.3/configs/preproc.yaml.example \
   -o preproc.yaml
 lafa --config preproc.yaml --dry-run
 ```

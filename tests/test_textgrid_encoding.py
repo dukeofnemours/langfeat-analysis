@@ -1,10 +1,12 @@
+import pytest
+
 from langfeat_analysis.preprocessing.text import TextEmbedderGrid
 
 
-def test_textgrid_reader_supports_utf16_with_bom(tmp_path):
+@pytest.mark.parametrize("encoding", ["utf-16-le", "utf-16-be"])
+def test_textgrid_reader_supports_utf16_with_bom(tmp_path, encoding):
     textgrid = tmp_path / "french.TextGrid"
-    textgrid.write_text(
-        '''File type = "ooTextFile"
+    content = '''File type = "ooTextFile"
 Object class = "TextGrid"
 
 xmin = 0
@@ -30,9 +32,9 @@ item []:
             xmin = 3.42
             xmax = 3.53
             text = "j'"
-''',
-        encoding="utf-16",
-    )
+'''
+    byte_order_mark = b"\xff\xfe" if encoding == "utf-16-le" else b"\xfe\xff"
+    textgrid.write_bytes(byte_order_mark + content.encode(encoding))
 
     reader = TextEmbedderGrid.__new__(TextEmbedderGrid)
     reader.annotation_path = textgrid

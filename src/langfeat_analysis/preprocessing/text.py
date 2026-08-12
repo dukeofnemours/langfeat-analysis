@@ -782,7 +782,11 @@ class TextEmbedderGrid:
         raw_content = self.annotation_path.read_bytes()
         # Praat can export long-text TextGrids as UTF-16.  ``utf-16`` consumes
         # either byte-order mark; UTF-8 remains the default for ordinary grids.
-        encoding = "utf-16" if raw_content.startswith((b"\xff\xfe", b"\xfe\xff")) else "utf-8-sig"
+        encoding = (
+            "utf-16"
+            if raw_content.startswith((b"\xff\xfe", b"\xfe\xff"))
+            else "utf-8-sig"
+        )
         content = raw_content.decode(encoding)
         if 'Object class = "TextGrid"' not in content:
             raise ValueError(f"Not a Praat TextGrid file: {self.annotation_path}")
