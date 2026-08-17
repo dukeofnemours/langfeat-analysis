@@ -28,7 +28,7 @@ from langfeat_analysis.io import atomic_json_dump, safe_output_path
 
 
 PIPELINE_NAME = "audio_preproc"
-PIPELINE_VERSION = "1.2.0"
+PIPELINE_VERSION = "1.3.0"
 
 
 @dataclass
@@ -91,7 +91,7 @@ def load_openl3_runtime(
 
 
 @dataclass
-class AudioPreprocessedData:
+class AudioPreprocessData:
     """Serializable feature matrix and provenance for one audio stimulus."""
 
     title: str
@@ -99,10 +99,40 @@ class AudioPreprocessedData:
     method: str
     feature_list: list[str]
     data: list[list[float]]
+    st_data: list[list[float]]
     pipeline: str
     dimensions: list[int]
     metadata: dict[str, Any]
     create_at: str
+
+
+# Preserve compatibility with existing imports of the former class name.
+AudioPreprocessedData = AudioPreprocessData
+
+
+def z_score_features(data: np.ndarray) -> np.ndarray:
+    """Standardize each feature row across time.
+
+    Rows with zero variance (including single-frame rows) are represented by
+    zeros so serialized output never contains values produced by division by
+    zero.
+    """
+    array = np.asarray(data, dtype=float)
+    if array.ndim != 2:
+        raise ValueError("Audio feature data must be a two-dimensional matrix.")
+    if array.shape[1] == 0:
+        return np.empty_like(array)
+
+    means = np.mean(array, axis=1, keepdims=True)
+    standard_deviations = np.std(array, axis=1, keepdims=True)
+    standardized = np.zeros_like(array, dtype=float)
+    np.divide(
+        array - means,
+        standard_deviations,
+        out=standardized,
+        where=standard_deviations != 0,
+    )
+    return standardized
 
 
 def build_tr_aligned_stimulus(
@@ -111,7 +141,7 @@ def build_tr_aligned_stimulus(
     data: np.ndarray,
     feature_list: Sequence[str] | None = None,
     metadata: dict[str, Any] | None = None,
-) -> AudioPreprocessedData:
+) -> AudioPreprocessData:
     """Build one JSON-ready audio feature record.
 
     Args:
@@ -123,12 +153,13 @@ def build_tr_aligned_stimulus(
     """
     array = np.asarray(data)
     title = re.sub("-", "_", f"{method}_{filename}_preproc")
-    return AudioPreprocessedData(
+    return AudioPreprocessData(
         title=title,
         stimulus=filename,
         method=method,
         feature_list=[str(item) for item in (feature_list or [])],
         data=array.tolist(),
+        st_data=z_score_features(array).tolist(),
         pipeline=f"{PIPELINE_NAME}_{PIPELINE_VERSION}",
         dimensions=list(array.shape),
         metadata=dict(metadata or {}),
